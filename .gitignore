@@ -73,6 +73,38 @@ closeBtn.MouseButton1Click:Connect(function()
     gui.Enabled = not gui.Enabled
 end)
 
+
+-- ===== Tiny Avatar Toggle Button (left edge) =====
+do
+    local AVATAR_FILE = "TanPhuHub/avatar.png"  -- bạn có thể đặt ảnh vào đây để dùng getcustomasset
+    local FALLBACK_IMG = "rbxassetid://7072717697" -- fallback nếu không có ảnh cục bộ
+    local img = FALLBACK_IMG
+    pcall(function()
+        if getcustomasset and isfile and isfile(AVATAR_FILE) then
+            img = getcustomasset(AVATAR_FILE)
+        end
+    end)
+
+    local avatarBtn = Instance.new("ImageButton")
+    avatarBtn.Name = "TP_AvatarToggle"
+    avatarBtn.Size = UDim2.new(0, 48, 0, 48)
+    avatarBtn.Position = UDim2.new(0, 10, 0.5, -24)
+    avatarBtn.BackgroundTransparency = 1
+    avatarBtn.Image = img
+    avatarBtn.Parent = gui
+
+    local uic = Instance.new("UICorner", avatarBtn)
+    uic.CornerRadius = UDim.new(1, 0)
+    local stroke = Instance.new("UIStroke", avatarBtn)
+    stroke.Thickness = 1.2
+    stroke.Color = Color3.fromRGB(0, 170, 255)
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+    avatarBtn.MouseButton1Click:Connect(function()
+        gui.Enabled = not gui.Enabled
+    end)
+end
+-- ===============================================================
 -- Sidebar
 local sidebar = Instance.new("Frame")
 sidebar.Parent = main
@@ -152,6 +184,32 @@ for _, txt in ipairs(sideButtons) do
     end
 end
 
+
+-- ===== Save / Load Settings buttons at bottom of sidebar =====
+do
+    local function makeBtn(txt)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -12, 0, 30)
+        b.Position = UDim2.new(0, 6, 1, -36)
+        b.Text = txt
+        b.Font = Enum.Font.GothamSemibold
+        b.TextSize = 13
+        b.TextColor3 = Color3.fromRGB(255,255,255)
+        b.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+        b.AutoButtonColor = true
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+        return b
+    end
+    local saveBtn = makeBtn("Save Settings")
+    saveBtn.Parent = sidebar
+    local loadBtn = makeBtn("Load Settings")
+    loadBtn.Parent = sidebar
+    loadBtn.Position = UDim2.new(0, 6, 1, -70)
+
+    saveBtn.MouseButton1Click:Connect(function() pcall(TP_SaveSettings, true) end)
+    loadBtn.MouseButton1Click:Connect(function() pcall(TP_LoadSettings, true) end)
+end
+-- ==================================================================
 --======================================================
 -- Toggle Builder
 --======================================================
@@ -218,6 +276,106 @@ local function createToggle(parent, text, description, order)
     }
 end
 
+
+-- ===== Settings Persist: Save/Load + Toggle Registry =====
+local HttpService = game:GetService("HttpService")
+getgenv().TanPhuSettings = getgenv().TanPhuSettings or { toggles = {}, _autosave = true }
+local TP_REG = {}
+local SETTINGS_DIR = "TanPhuHub"
+local SETTINGS_PATH = SETTINGS_DIR .. "/settings.json"
+
+local function TP_SaveSettings(notify)
+    local payload = { toggles = getgenv().TanPhuSettings.toggles or {} }
+    local ok, json = pcall(function() return HttpService:JSONEncode(payload) end)
+    if ok and writefile then
+        pcall(function()
+            if isfolder and not isfolder(SETTINGS_DIR) then makefolder(SETTINGS_DIR) end
+            writefile(SETTINGS_PATH, json)
+        end)
+    end
+    if notify then print("[TanPhu] Saved settings to " .. SETTINGS_PATH) end
+end
+
+local function TP_LoadSettings(notify)
+    local data = nil
+    if readfile and isfile and isfile(SETTINGS_PATH) then
+        local ok1, content = pcall(readfile, SETTINGS_PATH)
+        if ok1 then
+            local ok2, tbl = pcall(function() return HttpService:JSONDecode(content) end)
+            if ok2 and type(tbl)=="table" then data = tbl end
+        end
+    end
+    data = data or { toggles = getgenv().TanPhuSettings.toggles or {} }
+    for _, item in ipairs(TP_REG) do
+        local desired = data.toggles and data.toggles[item.key]
+        if desired ~= nil and item.widget and item.widget.ApplyState then
+            item.widget.ApplyState(desired)
+        end
+    end
+    if notify then print("[TanPhu] Loaded settings") end
+end
+
+-- Wrap createToggle để đăng ký & thêm ApplyState
+local _orig_createToggle = createToggle
+createToggle = function(parent, text, description, order)
+    local w = _orig_createToggle(parent, text, description, order)
+    -- tìm Toggle button & knob để điều khiển UI
+    local toggleBtn, knob = nil, nil
+    for _, ch in ipairs(w.Frame:GetChildren()) do
+        if ch:IsA("TextButton") then
+            toggleBtn = ch
+            knob = ch:FindFirstChildWhichIsA("Frame")
+        end
+    end
+    local _state, _usercb = false, nil
+    local _origSet = w.SetCallback
+    w.SetCallback = function(fn)
+        _usercb = fn
+        _origSet(function(s)
+            _state = s
+            getgenv().TanPhuSettings.toggles[text] = s
+            if _usercb then _usercb(s) end
+            TP_SaveSettings(false) -- autosave mỗi lần đổi
+        end)
+    end
+    function w.ApplyState(s)
+        s = not not s
+        if _state == s then return end
+        _state = s
+        getgenv().TanPhuSettings.toggles[text] = s
+        if toggleBtn and knob then
+            if s then
+                TweenService:Create(toggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0,170,255)}):Play()
+                TweenService:Create(knob, TweenInfo.new(0.2), {Position = UDim2.new(1, -21, 0, 1)}):Play()
+            else
+                TweenService:Create(toggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(180,180,180)}):Play()
+                TweenService:Create(knob, TweenInfo.new(0.2), {Position = UDim2.new(0, 1, 0, 1)}):Play()
+            end
+        end
+        if _usercb then _usercb(s) end
+    end
+    table.insert(TP_REG, {key = text, widget = w})
+    return w
+end
+
+-- Tự load sau khi các toggle tạo xong
+task.defer(function()
+    task.wait(0.6)
+    TP_LoadSettings(false)
+end)
+
+-- Giữ khi qua server (queue_on_teleport nếu có)
+do
+    local q = queue_on_teleport or (syn and syn.queue_on_teleport)
+    if q and readfile and isfile and isfile(SETTINGS_PATH) then
+        local ok, content = pcall(readfile, SETTINGS_PATH)
+        if ok and type(content)=="string" then
+            local esc = content:gsub("\\", "\\\\"):gsub("'", "\\'")
+            q(("pcall(function() local HttpService=game:GetService('HttpService'); getgenv().TanPhuSettings = HttpService:JSONDecode('%s') end)"):format(esc))
+        end
+    end
+end
+-- ================================================================
 --======================================================
 -- Helper Tab
 --======================================================
@@ -636,6 +794,619 @@ end
 local playerTab = contentTabs["Player"]
 
 -- Biến Infinite Jump
+
+-- ===== Player > speed boost rebirth 4 =====
+
+-- ===== Player > fix fps akun =====
+local fixfpsThread = nil
+
+local fixfpsToggle = createToggle(playerTab, "fix fps akun", "Giảm lag, tăng FPS", 3)
+fixfpsToggle.SetCallback(function(state)
+    if state then
+        if fixfpsThread then task.cancel(fixfpsThread) end
+        fixfpsThread = task.spawn(function()
+local ws = game:GetService("Workspace")
+
+local function nuke(obj)
+    if obj and obj:IsA("Accessory") then
+        pcall(function() obj:Destroy() end)
+    end
+end
+
+for _, v in ipairs(ws:GetDescendants()) do
+    nuke(v)
+end
+
+ws.DescendantAdded:Connect(function(inst)
+    nuke(inst)
+end)
+
+getgenv().On = false
+if getgenv().On == false then
+    return
+end
+
+local p  = game:GetService("Players")
+local l  = p.LocalPlayer
+local bp = l.Backpack
+local c  = l.Character or workspace:WaitForChild(l.Name)
+local h  = c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid")
+local tool = bp:FindFirstChildOfClass("Tool")
+local rs = game:GetService("RunService")
+
+while task.wait() do
+    if getgenv().On == false then
+        break
+    end
+    h:EquipTool(tool)
+    task.wait()
+end
+
+        end)
+    else
+        if fixfpsThread then
+            task.cancel(fixfpsThread)
+            fixfpsThread = nil
+        end
+    end
+end)
+-- ======================================================
+
+local _tp_hybrid_obj = nil
+
+local function TP_BuildHybridGrapple(parentGui)
+--======================================================
+-- HYBRID GRAPPLE — Q toggle, Ctrl+Q panel (workspace rope index)
+--======================================================
+do
+    local Players = game:GetService('Players')
+    local UIS = game:GetService('UserInputService')
+    local CAS = game:GetService('ContextActionService')
+    local RS = game:GetService('RunService')
+
+    local LocalPlayer = Players.LocalPlayer
+
+    --================= CONFIG =================
+    local FORCE_TOOL_NAME = 'Grapple Hook'
+    local AUTO_EQUIP = true
+
+    local SPEED_MIN, SPEED_MAX, SPEED_STEP = 40, 320, 5
+    local MAX_SPEED = 150 -- bạn có thể đổi mặc định ở đây
+    local EFF_SPEED = 150
+    local EFF_MIN = 70
+    local RAMP_UP = 35
+    local RAMP_DOWN = 220
+    local BLEND = 0.55
+    local ONLY_FLAT = true
+    local CAM_WEIGHT = 0.9
+    local MOVE_WEIGHT = 0.8
+
+    local HOOK_ACTIVATE_MIN, HOOK_ACTIVATE_MAX = 0.28, 0.75
+    local HOOK_ACTIVATE_UP, HOOK_ACTIVATE_DOWN = 0.12, 0.05
+
+    local SNAP_POS_THRESHOLD = 3.2
+    local SNAP_VEL_THRESHOLD = 45.0
+    local SNAP_COOLDOWN = 0.30
+
+    local AIR_MULTIPLIER = 0.6
+    local RAY_LENGTH = 6
+    local GROUND_COOLDOWN = 0.12
+    --==========================================
+
+    local enabled = false
+    local char, hum, hrp
+    local trackedTool, toolEquipped = nil, false
+    local lastPos, lastVel, lastSnapAt = nil, nil, 0
+    local hookInterval, lastActivate = HOOK_ACTIVATE_MIN, 0
+    local lastGroundCheck, isAir = 0, false
+
+    -- GUI cha (xài lại gui nếu có)
+    local parentGui = (typeof(gui) == 'Instance' and gui:IsA('ScreenGui')) and gui
+        or (function()
+            local g = Instance.new('ScreenGui')
+            g.Name = 'TP_HybridGrappleGui'
+            g.ResetOnSpawn = false
+            g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            g.Parent = game:GetService('CoreGui')
+            return g
+        end)()
+
+    local function showToast(msg, t)
+        local toast = parentGui:FindFirstChild('TP_Toast')
+            or (function()
+                local lb = Instance.new('TextLabel')
+                lb.Name = 'TP_Toast'
+                lb.Size = UDim2.new(0, 320, 0, 32)
+                lb.Position = UDim2.new(0.5, -160, 0, 36)
+                lb.BackgroundColor3 = Color3.fromRGB(25, 50, 100)
+                lb.BackgroundTransparency = 0.12
+                lb.TextColor3 = Color3.fromRGB(255, 255, 255)
+                lb.Font = Enum.Font.GothamSemibold
+                lb.TextSize = 14
+                lb.Visible = false
+                lb.Parent = parentGui
+                Instance.new('UICorner', lb).CornerRadius = UDim.new(0, 8)
+                return lb
+            end)()
+        toast.Text = msg
+        toast.Visible = true
+        task.delay(t or 1.1, function()
+            if toast then
+                toast.Visible = false
+            end
+        end)
+    end
+
+    --================ PANEL ====================
+    local panelFrame, lblRope
+    local function refreshOnBtn() end
+    local function refreshPanel() end
+
+    do
+        local fr = Instance.new('Frame')
+        fr.Name = 'TP_SpeedPanel'
+        fr.Size = UDim2.new(0, 320, 0, 210)
+        fr.Position = UDim2.new(1, -330, 0, 80)
+        fr.BackgroundColor3 = Color3.fromRGB(25, 50, 100)
+        fr.BackgroundTransparency = 0.12
+        fr.Visible = false
+        fr.Parent = parentGui
+        Instance.new('UICorner', fr).CornerRadius = UDim.new(0, 10)
+        panelFrame = fr
+
+        local function mkLabel(y)
+            local l = Instance.new('TextLabel', fr)
+            l.Size = UDim2.new(1, -20, 0, 20)
+            l.Position = UDim2.new(0, 10, 0, y)
+            l.BackgroundTransparency = 1
+            l.Font = Enum.Font.Gotham
+            l.TextSize = 14
+            l.TextXAlignment = Enum.TextXAlignment.Left
+            l.TextColor3 = Color3.fromRGB(220, 235, 255)
+            l.Text = ''
+            return l
+        end
+
+        local title = mkLabel(6)
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 16
+        title.Text = 'Hybrid Grapple (Debug)'
+
+        local onBtn = Instance.new('TextButton', fr)
+        onBtn.Size = UDim2.new(0, 84, 0, 30)
+        onBtn.Position = UDim2.new(0, 10, 0, 36)
+        onBtn.AutoButtonColor = true
+        onBtn.Font = Enum.Font.GothamSemibold
+        onBtn.TextSize = 14
+        onBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        onBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+        onBtn.Text = 'OFF'
+        Instance.new('UICorner', onBtn).CornerRadius = UDim.new(0, 8)
+
+        local spLabel = mkLabel(72)
+        spLabel.Text = 'Max Speed:'
+        local spBox = Instance.new('TextBox', fr)
+        spBox.Size = UDim2.new(0, 68, 0, 28)
+        spBox.Position = UDim2.new(0, 110, 0, 68)
+        spBox.BackgroundColor3 = Color3.fromRGB(30, 60, 120)
+        spBox.Font = Enum.Font.GothamSemibold
+        spBox.TextSize = 14
+        spBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+        spBox.ClearTextOnFocus = false
+        Instance.new('UICorner', spBox).CornerRadius = UDim.new(0, 8)
+
+        local lblEff = mkLabel(100)
+        local lblTool = mkLabel(122)
+        lblRope = mkLabel(144)
+        local lblMode = mkLabel(166)
+        local lblAir = mkLabel(188)
+
+        function refreshOnBtn()
+            if enabled then
+                onBtn.Text = 'ON'
+                onBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+            else
+                onBtn.Text = 'OFF'
+                onBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+            end
+        end
+        function refreshPanel()
+            spBox.Text = tostring(MAX_SPEED)
+            lblEff.Text = ('EffSpeed: %d | HookInterval: %.2fs'):format(
+                math.floor(EFF_SPEED + 0.5),
+                hookInterval
+            )
+            lblTool.Text = ('ToolFound: %s | Equipped: %s'):format(
+                trackedTool and 'Yes' or 'No',
+                toolEquipped and 'Yes' or 'No'
+            )
+            lblMode.Text = ('Mode: %s'):format(
+                (trackedTool and toolEquipped) and 'Hook/Pet-auto' or 'Pet'
+            )
+            lblAir.Text = ('isAir: %s'):format(isAir and 'Yes' or 'No')
+        end
+
+        onBtn.MouseButton1Click:Connect(function()
+            enabled = not enabled
+            refreshOnBtn()
+            refreshPanel()
+            showToast(
+                ('Hybrid: %s  (Max %d / Eff %d)'):format(
+                    enabled and 'ON' or 'OFF',
+                    MAX_SPEED,
+                    EFF_SPEED
+                ),
+                1.2
+            )
+        end)
+        spBox.FocusLost:Connect(function()
+            local n = tonumber((spBox.Text or ''):gsub('[^%d]', ''))
+            if n then
+                n = math.clamp(
+                    math.floor(n / SPEED_STEP + 0.5) * SPEED_STEP,
+                    SPEED_MIN,
+                    SPEED_MAX
+                )
+                MAX_SPEED = n
+                if EFF_SPEED > MAX_SPEED then
+                    EFF_SPEED = MAX_SPEED
+                end
+            end
+            refreshPanel()
+            showToast(('Max set: %d'):format(MAX_SPEED), 0.9)
+        end)
+    end
+    --==========================================
+
+    -- Bind phím Q (ưu tiên cao)
+    local function toggleAction(_, state)
+        if state ~= Enum.UserInputState.Begin then
+            return Enum.ContextActionResult.Pass
+        end
+        enabled = not enabled
+        refreshOnBtn()
+        refreshPanel()
+        showToast(
+            ('Hybrid: %s  (Max %d / Eff %d)'):format(
+                enabled and 'ON' or 'OFF',
+                MAX_SPEED,
+                EFF_SPEED
+            ),
+            1.2
+        )
+        return Enum.ContextActionResult.Sink
+    end
+    CAS:BindActionAtPriority(
+        'TP_ToggleHybrid',
+        toggleAction,
+        true,
+        3000,
+        Enum.KeyCode.Q
+    )
+
+    -- Ctrl+Q: mở/đóng panel
+    UIS.InputEnded:Connect(function(input)
+        if
+            input.KeyCode == Enum.KeyCode.Q
+            and (
+                UIS:IsKeyDown(Enum.KeyCode.LeftControl)
+                or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+            )
+        then
+            panelFrame.Visible = not panelFrame.Visible
+            refreshPanel()
+        end
+    end)
+
+    -- Character
+    local function onCharacter(c)
+        char = c
+        hum = c:WaitForChild('Humanoid', 6)
+        hrp = c:WaitForChild('HumanoidRootPart', 6)
+        trackedTool, toolEquipped = nil, false
+        lastPos, lastVel = nil, nil
+        c.ChildAdded:Connect(function(obj)
+            if obj:IsA('Tool') and obj.Name == FORCE_TOOL_NAME then
+                trackedTool, toolEquipped = obj, true
+            end
+        end)
+        c.ChildRemoved:Connect(function(obj)
+            if obj == trackedTool then
+                trackedTool, toolEquipped = nil, false
+            end
+        end)
+    end
+    if LocalPlayer.Character then
+        onCharacter(LocalPlayer.Character)
+    end
+    LocalPlayer.CharacterAdded:Connect(onCharacter)
+
+    local function getToolInBackpack()
+        local bp = LocalPlayer:FindFirstChildOfClass('Backpack')
+        if not bp then
+            return nil
+        end
+        local t = bp:FindFirstChild(FORCE_TOOL_NAME)
+        if t and t:IsA('Tool') then
+            return t
+        end
+        return nil
+    end
+
+    -- hướng mix
+    local function mixedDir()
+        if not hrp then
+            return nil
+        end
+        local v = Vector3.zero
+        local cam = workspace.CurrentCamera
+        if cam then
+            v += cam.CFrame.LookVector * CAM_WEIGHT
+        end
+        if hum and hum.MoveDirection.Magnitude > 1e-3 then
+            v += hum.MoveDirection * MOVE_WEIGHT
+        end
+        if v.Magnitude < 1e-3 then
+            return nil
+        end
+        v = v.Unit
+        if ONLY_FLAT then
+            v = Vector3.new(v.X, 0, v.Z)
+        end
+        if v.Magnitude < 1e-3 then
+            return nil
+        end
+        return v.Unit
+    end
+
+    -- ============ INDEX ROPE/BEAM Ở WORKSPACE ============
+    local indexedRopes = {}
+
+    local function _isInChar(inst)
+        return inst and char and inst:IsDescendantOf(char)
+    end
+
+    local function refreshRopeIndex()
+        if not char then
+            indexedRopes = {}
+            return
+        end
+        local t = {}
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA('RopeConstraint') then
+                local a0, a1 = d.Attachment0, d.Attachment1
+                if a0 and a1 and (_isInChar(a0) or _isInChar(a1)) then
+                    table.insert(t, d)
+                end
+            elseif d:IsA('Beam') then
+                local a0, a1 = d.Attachment0, d.Attachment1
+                if a0 and a1 and (_isInChar(a0) or _isInChar(a1)) then
+                    table.insert(t, d)
+                end
+            end
+        end
+        indexedRopes = t
+    end
+
+    task.spawn(function()
+        while true do
+            if enabled then
+                pcall(refreshRopeIndex)
+            end
+            task.wait(0.25)
+        end
+    end)
+
+    -- Ưu tiên tool/char; nếu không thấy dùng indexedRopes
+    local function findRopeAndDir()
+        if not hrp then
+            return nil, false
+        end
+
+        local function dirFromPair(a, b)
+            if not a or not b then
+                return nil
+            end
+            local from = hrp.Position
+            local to = (_isInChar(a) and b)
+                or (_isInChar(b) and a)
+                or (((from - a).Magnitude < (from - b).Magnitude) and b or a)
+            local v = to - from
+            if v.Magnitude < 1e-3 then
+                return nil
+            end
+            v = Vector3.new(v.X, 0, v.Z)
+            if v.Magnitude < 1e-3 then
+                return nil
+            end
+            return v.Unit
+        end
+
+        local function ropeFrom(inst)
+            local rope = inst:FindFirstChildOfClass('RopeConstraint', true)
+            if rope and rope.Attachment0 and rope.Attachment1 then
+                return rope.Attachment0.WorldPosition,
+                    rope.Attachment1.WorldPosition,
+                    true
+            end
+            local beam = inst:FindFirstChildOfClass('Beam', true)
+            if beam and beam.Attachment0 and beam.Attachment1 then
+                return beam.Attachment0.WorldPosition,
+                    beam.Attachment1.WorldPosition,
+                    true
+            end
+            return nil, nil, false
+        end
+
+        if trackedTool then
+            local a, b, ok = ropeFrom(trackedTool)
+            if ok then
+                local d = dirFromPair(a, b)
+                if d then
+                    return d, true
+                end
+            end
+        end
+        if char then
+            local a, b, ok = ropeFrom(char)
+            if ok then
+                local d = dirFromPair(a, b)
+                if d then
+                    return d, true
+                end
+            end
+        end
+
+        for _, rc in ipairs(indexedRopes) do
+            local a, b
+            if rc:IsA('RopeConstraint') then
+                if rc.Attachment0 and rc.Attachment1 then
+                    a = rc.Attachment0.WorldPosition
+                    b = rc.Attachment1.WorldPosition
+                end
+            else
+                if rc.Attachment0 and rc.Attachment1 then
+                    a = rc.Attachment0.WorldPosition
+                    b = rc.Attachment1.WorldPosition
+                end
+            end
+            local d = dirFromPair(a, b)
+            if d then
+                return d, true
+            end
+        end
+
+        return nil, false
+    end
+    -- ================================================
+
+    local function detectSnap(dt)
+        if not lastPos or not lastVel or not hrp then
+            return false
+        end
+        local predicted = lastPos + lastVel * (dt or 0.0167)
+        local posErr = (hrp.Position - predicted).Magnitude
+        local velNow = hrp.AssemblyLinearVelocity
+        local velErr = (velNow - lastVel).Magnitude
+        return (posErr > SNAP_POS_THRESHOLD) and (velErr > SNAP_VEL_THRESHOLD)
+    end
+
+    local function checkGround()
+        if not hrp then
+            return
+        end
+        local now = tick()
+        if now - lastGroundCheck < GROUND_COOLDOWN then
+            return
+        end
+        lastGroundCheck = now
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = { char }
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        local res = workspace:Raycast(
+            hrp.Position,
+            Vector3.new(0, -RAY_LENGTH, 0),
+            params
+        )
+        isAir = (res == nil)
+    end
+
+    RS.Heartbeat:Connect(function(dt)
+        if not enabled or not hrp then
+            return
+        end
+
+        if (not trackedTool) or (trackedTool.Parent ~= char) then
+            local t = getToolInBackpack()
+            if t and AUTO_EQUIP and hum then
+                pcall(function()
+                    hum:EquipTool(t)
+                end)
+            end
+        end
+
+        checkGround()
+
+        if dt and detectSnap(dt) and (tick() - lastSnapAt) > SNAP_COOLDOWN then
+            lastSnapAt = tick()
+            EFF_SPEED = math.max(
+                EFF_MIN,
+                math.min(EFF_SPEED - RAMP_DOWN * dt * 0.6, MAX_SPEED)
+            )
+            hookInterval =
+                math.min(HOOK_ACTIVATE_MAX, hookInterval + HOOK_ACTIVATE_UP)
+        else
+            local upGain = isAir and (RAMP_UP * 0.5) or RAMP_UP
+            if EFF_SPEED < MAX_SPEED then
+                EFF_SPEED =
+                    math.min(MAX_SPEED, EFF_SPEED + upGain * (dt or 0.0167))
+            elseif EFF_SPEED > MAX_SPEED then
+                EFF_SPEED = math.max(
+                    MAX_SPEED,
+                    EFF_SPEED - RAMP_DOWN * 0.5 * (dt or 0.0167)
+                )
+            end
+            hookInterval =
+                math.max(HOOK_ACTIVATE_MIN, hookInterval - HOOK_ACTIVATE_DOWN)
+        end
+
+        local dir, ropeOK = findRopeAndDir()
+        if panelFrame.Visible and lblRope then
+            lblRope.Text = ('RopeFound: %s'):format(ropeOK and 'Yes' or 'No')
+        end
+        if not dir then
+            dir = mixedDir()
+        end
+        if dir then
+            local cur = hrp.AssemblyLinearVelocity
+            local eff = isAir and (EFF_SPEED * AIR_MULTIPLIER) or EFF_SPEED
+            local target = dir * eff
+            local newX = cur.X * (1 - BLEND) + target.X * BLEND
+            local newZ = cur.Z * (1 - BLEND) + target.Z * BLEND
+            hrp.AssemblyLinearVelocity = Vector3.new(newX, cur.Y, newZ)
+        end
+
+        if
+            trackedTool
+            and trackedTool.Parent == char
+            and trackedTool.Activate
+        then
+            local now = tick()
+            if now - lastActivate >= hookInterval then
+                lastActivate = now
+                pcall(function()
+                    trackedTool:Activate()
+                end)
+            end
+        end
+
+        lastVel = hrp.AssemblyLinearVelocity
+        lastPos = hrp.Position
+
+        if panelFrame.Visible then
+            refreshPanel()
+        end
+    end)
+
+    refreshOnBtn()
+    refreshPanel()
+end
+
+end
+
+local speedToggle = createToggle(playerTab, "speed boost rebirth 4", "Q để bật/tắt, Ctrl+Q mở panel", 2)
+speedToggle.SetCallback(function(state)
+    if not _tp_hybrid_obj and state then
+        _tp_hybrid_obj = TP_BuildHybridGrapple(gui)
+    end
+    if _tp_hybrid_obj then
+        if _tp_hybrid_obj.setEnabled then
+            _tp_hybrid_obj.setEnabled(state)
+        end
+    end
+end)
+-- ======================================================
+
 local infJumpEnabled = false
 local HRP
 
@@ -1132,3 +1903,1460 @@ end
 ----------------------------------------------------------------------------------------------------
 --                                         ADD-ON END
 ----------------------------------------------------------------------------------------------------
+
+-- ===== Finder > finder secret 10m/s auto =====
+local finder_secret_10m_s_auto_thread = nil
+local finder_secret_10m_s_autoToggle = createToggle(contentTabs["Finder"], "finder secret 10m/s auto", "Auto finder", 1)
+finder_secret_10m_s_autoToggle.SetCallback(function(state)
+    if state then
+        if finder_secret_10m_s_auto_thread then task.cancel(finder_secret_10m_s_auto_thread) end
+        finder_secret_10m_s_auto_thread = task.spawn(function()
+-- Server Hopper – Steal a Brainrot (smart + anti-VN + block-forever + 1h-temp-blacklist + escalate + pause-on-pet)
+-- Game: https://www.roblox.com/games/109983668079237/Steal-a-Brainrot
+local TARGET_PLACE_ID = 109983668079237
+
+-- ====== PET LIST (mỗi dòng 1 tên; phần sau ":" chỉ là ghi chú, bỏ qua khi khớp) ======
+local PET_LIST = [[
+Graipuss Medussi: 10M/s-20m/s
+La Grande Combinasion: 10M/s-300M/s
+Los Combinasionas: 15M/s-400M/s
+Nuclearo Dinossauro: 15M/s-300M/s
+Los Hotspotsitos: 20M/s-400M/s
+Garama and Madundung: 50M/s-2B/s
+]]
+
+-- ========= Services =========
+local Players         = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService     = game:GetService("HttpService")
+
+local LP     = Players.LocalPlayer
+local JOB_ID = game.JobId
+
+-- Executor helpers
+local queue_on_tp = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+local has_file    = (typeof(isfile) == "function")
+local read_file   = readfile
+local write_file  = writefile
+local del_file    = delfile
+
+-- ========= CONFIG =========
+local CONFIG = {
+  AVOID_FULL        = true,
+  HOP_DELAY_SEC     = {min=0.2, max=0.6},
+
+  -- chọn phòng
+  PREFERRED_COUNTS  = {6, 7},          -- ưu tiên tuyệt đối
+  NEAR_TARGET       = 6.5,             -- điểm đích
+  NEAR_WINDOW       = {min=4, max=9},  -- ưu tiên gần trong khung này
+  FALLBACK_MIN      = 2,               -- fallback mềm: ≥2 người
+  MIN_OPEN_SOFT     = 2,               -- thích phòng còn ≥2 slot
+
+  -- né server có vẻ VN
+  LOCALE = {
+    avoid_vietnamese          = true,  -- bật né VN
+    vn_ratio_threshold        = 0.40,  -- ≥40% tên giống VN → coi là VN
+    prefer_higher_ping_ms     = 120,   -- >=120ms cộng nhẹ điểm (0 để tắt)
+    penalty_if_vn             = 1000,  -- trừ điểm cực mạnh cho server VN
+  },
+
+  -- visited / lặp
+  TTL_SECONDS       = 3*60*60,         -- sẽ override ở dưới nếu BLOCK_OLD_FOREVER=true
+  MAX_REMEMBER      = 120000,          -- nhớ nhiều jobId để không lặp
+  PERSIST_TO_DISK   = true,
+  BLOCK_OLD_FOREVER = true,            -- 🔒 chặn vĩnh viễn server đã từng vào
+
+  -- ==== BLACKLIST TẠM THỜI (1H) ====
+  TEMP_BLACKLIST_ENABLED = true,       -- bật blacklist tạm
+  TEMP_BLACKLIST_TTL     = 60*60,      -- 1 giờ
+  TEMP_BLACKLIST_ON_FAIL = true,       -- tự động add server fail vào blacklist 1h
+
+  -- retry & loop
+  RETRY_BACKOFF     = {min=0.35, max=0.9},
+  LOOP_INTERVAL     = 2.2,
+  FAIL_COOLDOWN     = 5,
+
+  -- anti-kẹt & escalate
+  LOCK_WATCHDOG     = 3.0,
+  ESCALATE_AFTER_FAILS = 6,            -- nhiều fail liên tiếp → Teleport(place)
+  STALL_TIMEOUT_SEC    = 12,           -- kẹt lâu → Teleport(place)
+
+  -- pet
+  PET_SCAN_INTERVAL = 1.5,
+  PET_CLEAR_GRACE   = 2.0,
+}
+
+if CONFIG.BLOCK_OLD_FOREVER then
+  CONFIG.TTL_SECONDS = 10 * 365 * 24 * 60 * 60  -- 10 năm ≈ vĩnh viễn
+end
+
+-- ========= STATE =========
+local visited, fail_cooldown = {}, {}
+local VISITED_FILE = ("visited_%d.json"):format(TARGET_PLACE_ID)
+
+-- BLACKLIST 1H
+local tblack = {}  -- [jobId] = expiresAt (unix)
+local TBLACK_FILE = ("blacklist_%d.json"):format(TARGET_PLACE_ID)
+
+local HOP_LOCK, LOCK_AT = false, 0
+local LAST_TARGET_ID, LAST_ATTEMPT_AT = nil, 0
+local CONSEC_FAILS = 0
+
+-- ========= Utils =========
+local function now() return os.time() end
+local function clk() return os.clock() end
+local function jdecode(s) local ok,d=pcall(function()return HttpService:JSONDecode(s)end); if ok then return d end end
+local function jencode(t) local ok,s=pcall(function()return HttpService:JSONEncode(t)end); if ok then return s end end
+local function wait_range(a,b) task.wait(a + math.random()*(b-a)) end
+local function on_cooldown(id) local t=fail_cooldown[id]; return t and (now()-t)<=CONFIG.FAIL_COOLDOWN end
+
+local function http_get(url)
+  local ok, body = pcall(game.HttpGet, game, url, true)
+  if ok and body then return true, body end
+  if syn and syn.request then
+    local r = syn.request({Url=url, Method="GET"}); if r and r.StatusCode==200 then return true, r.Body end
+  end
+  if http_request then
+    local r = http_request({Url=url, Method="GET"}); if r and (r.StatusCode==200 or r.StatusCode==0) then return true, (r.Body or r.body) end
+  end
+  return false
+end
+
+local function purge_old()
+  local t=now()
+  for id,ts in pairs(visited) do if type(ts)~="number" or (t-ts)>CONFIG.TTL_SECONDS then visited[id]=nil end end
+  for id,ts in pairs(fail_cooldown) do if (t-ts)>CONFIG.FAIL_COOLDOWN then fail_cooldown[id]=nil end end
+  -- purge blacklist hết hạn
+  for id,exp in pairs(tblack) do if type(exp)~="number" or t>=exp then tblack[id]=nil end end
+  -- cắt bớt visited nếu quá lớn (an toàn)
+  local n=0 for _ in pairs(visited) do n+=1 end
+  if n>CONFIG.MAX_REMEMBER then
+    local drop=n-CONFIG.MAX_REMEMBER
+    for k in pairs(visited) do visited[k]=nil; drop-=1; if drop<=0 then break end end
+  end
+end
+
+-- ====== TeleportData & persist ======
+local function get_tpdata()
+  local out; pcall(function()
+    local td=TeleportService:GetLocalPlayerTeleportData()
+    if td==nil then out=nil
+    elseif typeof(td)=="Instance" and td.ClassName=="TeleportOptions" then
+      local ok,tbl=pcall(function()return td:GetTeleportData()end)
+      if ok and type(tbl)=="table" then out=tbl end
+    elseif type(td)=="table" then out=td end
+  end); return out
+end
+local function merge_num_map(dst, src) if type(src)~="table" then return end; for k,v in pairs(src) do if type(k)=="string" and type(v)=="number" then dst[k]=v end end end
+
+-- Reset visited nếu cần: đặt shared.RESET_VISITED = true trước khi chạy script
+local function reset_visited()
+  visited = {}
+  pcall(function() if typeof(del_file)=="function" then del_file(VISITED_FILE) end end)
+  print("[ServerHop] Đã reset danh sách server đã vào.")
+end
+if rawget(shared, "RESET_VISITED") then reset_visited(); shared.RESET_VISITED = nil end
+
+-- Blacklist 1h helpers
+local function save_blacklist()
+  if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(tblack); if s then pcall(write_file, TBLACK_FILE, s) end end
+end
+local function load_blacklist()
+  if CONFIG.PERSIST_TO_DISK and has_file and isfile(TBLACK_FILE) then
+    local ok,raw=pcall(read_file, TBLACK_FILE)
+    if ok and raw then local obj=jdecode(raw); if type(obj)=="table" then for k,v in pairs(obj) do if type(v)=="number" then tblack[k]=v end end end end
+  end
+end
+local function blacklist_add(id, reason)
+  if not CONFIG.TEMP_BLACKLIST_ENABLED or not id then return end
+  tblack[id] = now() + CONFIG.TEMP_BLACKLIST_TTL
+  print(("[ServerHop] 🛑 Blacklist 1h: %s (%s)"):format(tostring(id), tostring(reason or "")))
+  save_blacklist()
+end
+local function is_blacklisted(id)
+  if not CONFIG.TEMP_BLACKLIST_ENABLED then return false end
+  local exp = tblack[id]
+  return exp and now() < exp
+end
+
+-- Lệnh thủ công
+if rawget(shared, "ADD_BLACKLIST") then
+  local val = shared.ADD_BLACKLIST
+  if type(val)=="string" then blacklist_add(val, "manual")
+  elseif type(val)=="table" then for _,jid in ipairs(val) do blacklist_add(tostring(jid), "manual") end end
+  shared.ADD_BLACKLIST = nil
+end
+if rawget(shared, "RESET_BLACKLIST") then
+  tblack = {}
+  pcall(function() if typeof(del_file)=="function" then del_file(TBLACK_FILE) end end)
+  print("[ServerHop] Đã reset blacklist tạm (1h).")
+  shared.RESET_BLACKLIST = nil
+end
+
+local function save_persist() if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(visited); if s then pcall(write_file,VISITED_FILE,s) end end end
+local function load_persist()
+  local td=get_tpdata(); if td and td.visited then merge_num_map(visited,td.visited) end
+  if CONFIG.PERSIST_TO_DISK and has_file and isfile(VISITED_FILE) then local ok,raw=pcall(read_file,VISITED_FILE); if ok and raw then merge_num_map(visited, jdecode(raw) or {}) end end
+  if rawget(shared,"__HOP_CARRY") then local c=shared.__HOP_CARRY; if c.visited then merge_num_map(visited,c.visited) end end
+  visited[JOB_ID]=now(); purge_old()
+end
+local function carry_on_tp() if not queue_on_tp then return end; local blob=jencode(visited) or "{}"; pcall(queue_on_tp, ([[shared.__HOP_CARRY={visited=%s}]]):format(blob)) end
+
+-- ====== Fetch servers ======
+local function fetch_v1(cursor)
+  local url=("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s"):format(TARGET_PLACE_ID, cursor and ("&cursor="..HttpService:UrlEncode(cursor)) or "")
+  local ok,body=http_get(url); if not ok then return nil end
+  local obj=jdecode(body); if not obj then return nil end
+  return obj
+end
+
+local function fetch_legacy(startindex)
+  startindex=tonumber(startindex) or 0
+  local url=("https://www.roblox.com/games/getgameinstancesjson?placeId=%d&startindex=%d"):format(TARGET_PLACE_ID, startindex)
+  local ok,body=http_get(url); if not ok then return nil end
+  local obj=jdecode(body); if not obj or not obj.Collection then return nil end
+  local data={}
+  for _,v in ipairs(obj.Collection) do
+    local players = {}
+    if type(v.CurrentPlayers)=="table" then
+      for _,p in ipairs(v.CurrentPlayers) do
+        table.insert(players, {username=tostring(p.Username or ""), display=tostring(p.DisplayName or "")})
+      end
+    end
+    table.insert(data, {
+      id = v.Guid,
+      maxPlayers = v.Capacity,
+      playing = v.CurrentPlayers and #v.CurrentPlayers or v.CurrentPlayers or 0,
+      ping = tonumber(v.Ping),
+      players = players
+    })
+  end
+  return { data = data, nextPageCursor = (#data==0) and nil or tostring(startindex+10) }
+end
+
+-- ====== Anti-VN heuristic ======
+local VIET_CHARS_PATTERN = "[àáạảãâầấậẩẫ ăằắặẳẵèéẹẻẽêềếệểễ ìíịỉĩ òóọỏõôồốộổỗơờớợởỡ ùúụủũưừứựửữ ỳýỵỷỹ đĐ]"
+local VN_KEYWORDS = {" viet", " việt", " vn", " nguyen", " trần", " tran ", " lê ", " le ", " pham ", " phạm ", " ngoc ", " minh "}
+local function looks_vietnamese(s)
+  s = " "..string.lower(s or "").." "
+  if s:find(VIET_CHARS_PATTERN) then return true end
+  for _,kw in ipairs(VN_KEYWORDS) do if s:find(kw, 1, true) then return true end end
+  return false
+end
+local function vn_ratio(players)
+  if not players or #players==0 then return 0 end
+  local vn, total = 0, 0
+  for _,p in ipairs(players) do
+    total += 1
+    if looks_vietnamese(p.display) or looks_vietnamese(p.username) then vn += 1 end
+  end
+  return vn/total
+end
+
+-- ====== Pets ======
+local PET_NAMES, PET_HOLD, PET_LAST_SEEN, PET_LAST_FOUND_LIST = {}, false, 0, {}
+local function normalize_pet_list(text)
+  local set = {}
+  for raw in tostring(text):gmatch("[^\r\n]+") do
+    local line = raw:gsub("^%s+",""):gsub("%s+$","")
+    if line~="" and not line:match("^%-%-") then
+      local nameOnly = line:match("^(.-):") or line
+      nameOnly = nameOnly:gsub("%s+$","")
+      set[string.lower(nameOnly)] = true
+    end
+  end
+  return set
+end
+local function load_pet_names()
+  local set = normalize_pet_list(PET_LIST or "")
+  if has_file and isfile("pets_list.txt") then local ok,raw=pcall(read_file,"pets_list.txt"); if ok and raw then for k,_ in pairs(normalize_pet_list(raw)) do set[k]=true end end end
+  PET_NAMES=set
+end
+local function name_hit(sLower) for want,_ in pairs(PET_NAMES) do if sLower:find(want,1,true) then return want end end end
+local function scan_for_pets()
+  if next(PET_NAMES)==nil then return false,{} end
+  local found,matched=false,{}
+  for _,plr in ipairs(Players:GetPlayers()) do
+    local ch=plr.Character
+    if ch then
+      for _,inst in ipairs(ch:GetDescendants()) do
+        local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end
+        if inst:IsA("StringValue") then local v=string.lower(tostring(inst.Value or "")); local h2=name_hit(v); if h2 then found=true; matched[h2]=true end end
+      end
+    end
+    local bp=plr:FindFirstChildOfClass("Backpack")
+    if bp then for _,inst in ipairs(bp:GetDescendants()) do local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end end end
+  end
+  for _,inst in ipairs(workspace:GetDescendants()) do
+    if inst:IsA("Model") or inst:IsA("Folder") or inst:IsA("Accessory") or inst:IsA("Tool") then
+      local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end
+    elseif inst:IsA("StringValue") then
+      local v=string.lower(tostring(inst.Value or "")); local h2=name_hit(v); if h2 then found=true; matched[h2]=true end
+    end
+  end
+  return found,matched
+end
+local function update_pet_hold()
+  local ok,matched=scan_for_pets(); local tnow=tick()
+  if ok then
+    PET_LAST_SEEN=tnow
+    if not PET_HOLD then PET_HOLD=true; PET_LAST_FOUND_LIST={}; for k,_ in pairs(matched) do table.insert(PET_LAST_FOUND_LIST,k) end; print("[ServerHop] ▶️ gặp PET → dừng:", table.concat(PET_LAST_FOUND_LIST,", ")) end
+  elseif PET_HOLD and (tnow-PET_LAST_SEEN)>=CONFIG.PET_CLEAR_GRACE then PET_HOLD=false; print("[ServerHop] ⏩ pet hết → tiếp tục") end
+end
+
+-- ====== Smart picker (ưu tiên nước ngoài + tôn trọng blacklist) ======
+local function in_pref(n) for _,v in ipairs(CONFIG.PREFERRED_COUNTS) do if n==v then return true end end end
+local function pick_server()
+  local bestPref, bestNear, bestFb, bestAny = nil, nil, nil, nil
+  local nearScore, fbScore, anyScore = -1e12, -1e12, -1e12
+  local cursor, tries, mode = nil, 0, "legacy"  -- bắt đầu bằng legacy để có players/ping
+
+  local function consider(s)
+    local id=s.id; local playing=tonumber(s.playing) or 0; local cap=tonumber(s.maxPlayers) or 100
+    local open=cap-playing
+    if id==JOB_ID or visited[id] or on_cooldown(id) or (CONFIG.TEMP_BLACKLIST_ENABLED and is_blacklisted(id)) then return end
+    if CONFIG.AVOID_FULL and open<=0 then return end
+
+    local vr = s.players and vn_ratio(s.players) or 0
+    local isVN = CONFIG.LOCALE.avoid_vietnamese and (vr >= CONFIG.LOCALE.vn_ratio_threshold)
+    local vnPenalty = isVN and CONFIG.LOCALE.penalty_if_vn or 0
+    local openPenalty = (open < CONFIG.MIN_OPEN_SOFT) and 2 or 0
+    local pingBonus = (s.ping and CONFIG.LOCALE.prefer_higher_ping_ms>0 and s.ping >= CONFIG.LOCALE.prefer_higher_ping_ms) and 0.5 or 0
+
+    -- 1) exact 6/7
+    if in_pref(playing) and open>0 then
+      local sc = 10000 - open*0.01 - vnPenalty + pingBonus
+      if not bestPref or sc > (10000 - 0.01) then bestPref = s end
+    end
+
+    -- 2) gần 6.5 trong [4..9]
+    if playing>=CONFIG.NEAR_WINDOW.min and playing<=CONFIG.NEAR_WINDOW.max and open>0 then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - open*0.001 - vnPenalty + pingBonus
+      if sc > nearScore then nearScore = sc; bestNear = s end
+    end
+
+    -- 3) fallback ≥2 người
+    if open>0 and playing>=CONFIG.FALLBACK_MIN then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - vnPenalty + pingBonus
+      if sc > fbScore then fbScore = sc; bestFb = s end
+    end
+
+    -- 4) any open
+    if open>0 then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - vnPenalty + pingBonus
+      if sc > anyScore then anyScore = sc; bestAny = s end
+    end
+  end
+
+  while tries < 60 do
+    local page = (mode=="legacy") and fetch_legacy(cursor) or fetch_v1(cursor)
+    if not page then mode=(mode=="legacy") and "v1" or "legacy"; tries+=1
+    else
+      for _,s in ipairs(page.data or {}) do consider(s) end
+      if bestPref or (not page.nextPageCursor and (bestNear or bestFb or bestAny)) then break end
+      cursor = page.nextPageCursor
+      if not cursor then mode=(mode=="legacy") and "v1" or "legacy" end
+      tries+=1
+    end
+  end
+
+  if bestPref then return bestPref, "pref6/7" end
+  if bestNear then return bestNear, "near(4-9)" end
+  if bestFb   then return bestFb,   "fallback>=2" end
+  return bestAny, "anyopen"
+end
+
+-- ====== Robust Teleport ======
+local function try_teleport(jobId, reason)
+  print(("[ServerHop] Calling Teleport (reason=%s)"):format(reason or "?"))
+  local ok,err=pcall(function() TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, jobId, LP) end)
+  if ok then return true end
+  warn("[ServerHop] Teleport 3-arg error: "..tostring(err))
+  task.wait(0.05)
+  ok,err=pcall(function() TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, jobId, LP, nil, {visited=visited}) end)
+  if ok then return true end
+  warn("[ServerHop] Teleport 5-arg error: "..tostring(err))
+  return false,err
+end
+local function try_random(reason)
+  print(("[ServerHop] Random Teleport (reason=%s)"):format(reason or "?"))
+  local ok,err=pcall(function() TeleportService:Teleport(TARGET_PLACE_ID, LP, {visited=visited}) end)
+  if ok then return true end
+  warn("[ServerHop] Random Teleport(place,player,data) error: "..tostring(err))
+  task.wait(0.05)
+  ok,err=pcall(function() TeleportService:Teleport(TARGET_PLACE_ID) end)
+  if ok then return true end
+  warn("[ServerHop] Random Teleport(place) error: "..tostring(err))
+  return false,err
+end
+
+-- ====== Hop core ======
+local function save_and_carry()
+  if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(visited); if s then pcall(write_file,VISITED_FILE,s) end end
+  if queue_on_tp then local blob=jencode(visited) or "{}"; pcall(queue_on_tp, ([[shared.__HOP_CARRY={visited=%s}]]):format(blob)) end
+end
+
+local function hop_once(tag)
+  if HOP_LOCK or PET_HOLD then return end
+  HOP_LOCK=true; LOCK_AT=clk(); purge_old()
+
+  local target, why = pick_server()
+  if not target then
+    warn("[ServerHop] Hết server phù hợp. Chờ rồi thử lại…")
+    HOP_LOCK=false; return
+  end
+
+  LAST_TARGET_ID  = target.id
+  LAST_ATTEMPT_AT = clk()
+  save_and_carry()
+  print(string.format("[ServerHop] Hopping to %s | players=%s (%s)", target.id, tostring(target.playing), tostring(why)))
+  local okTeleport = try_teleport(target.id, why)
+  if not okTeleport then HOP_LOCK=false; return end
+end
+
+TeleportService.TeleportInitFailed:Connect(function(plr, result, errMsg)
+  if plr~=LP then return end
+  warn("[ServerHop] Teleport failed: "..tostring(result).." | "..tostring(errMsg))
+  if LAST_TARGET_ID then
+    fail_cooldown[LAST_TARGET_ID]=now()
+    if CONFIG.TEMP_BLACKLIST_ENABLED and CONFIG.TEMP_BLACKLIST_ON_FAIL then
+      blacklist_add(LAST_TARGET_ID, "fail:"..tostring(result))
+    end
+  end
+  CONSEC_FAILS += 1
+  HOP_LOCK=false
+  wait_range(CONFIG.RETRY_BACKOFF.min, CONFIG.RETRY_BACKOFF.max)
+
+  if CONSEC_FAILS >= CONFIG.ESCALATE_AFTER_FAILS and not PET_HOLD then
+    CONSEC_FAILS = 0
+    try_random("escalate-fails")
+  else
+    hop_once("retry:"..tostring(result))
+  end
+end)
+
+-- ====== Boot & loops ======
+local function boot()
+  load_blacklist()
+  local td=get_tpdata(); if td and td.visited then merge_num_map(visited,td.visited) end
+  load_persist()
+end
+local function safe(f) local ok,err=pcall(f); if not ok then warn("[ServerHop] init err: ",err) end end
+safe(load_pet_names)
+safe(boot)
+save_blacklist()
+save_persist()
+
+task.defer(function() wait_range(CONFIG.HOP_DELAY_SEC.min, CONFIG.HOP_DELAY_SEC.max); hop_once("start") end)
+
+task.spawn(function()
+  local lastLoop, lastScan = clk(), 0
+  while task.wait(0.25) do
+    if (tick()-lastScan) >= CONFIG.PET_SCAN_INTERVAL then lastScan=tick(); update_pet_hold() end
+
+    -- watchdog: mở khóa & thử ngay nếu kẹt
+    if HOP_LOCK and (clk()-LOCK_AT) > CONFIG.LOCK_WATCHDOG then
+      HOP_LOCK=false
+      if LAST_TARGET_ID then fail_cooldown[LAST_TARGET_ID]=now() end
+      print("[ServerHop] Watchdog: unlock stale lock → hop ngay")
+      hop_once("watchdog")
+    end
+
+    -- escalate nếu kẹt quá lâu
+    if not HOP_LOCK and not PET_HOLD and (clk()-LAST_ATTEMPT_AT) > CONFIG.STALL_TIMEOUT_SEC then
+      CONSEC_FAILS = 0
+      try_random("stall-timeout")
+      LAST_ATTEMPT_AT = clk()
+    end
+
+    if not HOP_LOCK and not PET_HOLD and (clk()-lastLoop) >= CONFIG.LOOP_INTERVAL then
+      lastLoop = clk()
+      hop_once("loop")
+    end
+  end
+end)
+
+print(string.format("[ServerHop] Ready on PlaceId=%d | ưu tiên 6–7, né server 'VN', block server cũ, blacklist tạm 1h | cooldown %ds",
+  TARGET_PLACE_ID, CONFIG.FAIL_COOLDOWN))
+
+        end)
+    else
+        if finder_secret_10m_s_auto_thread then
+            task.cancel(finder_secret_10m_s_auto_thread)
+            finder_secret_10m_s_auto_thread = nil
+        end
+    end
+end)
+-- ======================================================
+
+
+-- ===== Finder > finder secret 20m/s auto =====
+local finder_secret_20m_s_auto_thread = nil
+local finder_secret_20m_s_autoToggle = createToggle(contentTabs["Finder"], "finder secret 20m/s auto", "Auto finder", 2)
+finder_secret_20m_s_autoToggle.SetCallback(function(state)
+    if state then
+        if finder_secret_20m_s_auto_thread then task.cancel(finder_secret_20m_s_auto_thread) end
+        finder_secret_20m_s_auto_thread = task.spawn(function()
+-- Server Hopper – Steal a Brainrot (smart + anti-VN + block-forever + 1h-temp-blacklist + escalate + pause-on-pet)
+-- Game: https://www.roblox.com/games/109983668079237/Steal-a-Brainrot
+local TARGET_PLACE_ID = 109983668079237
+
+-- ====== PET LIST (mỗi dòng 1 tên; phần sau ":" chỉ là ghi chú, bỏ qua khi khớp) ======
+local PET_LIST = [[
+Graipuss Medussi: 10M/s-20m/s
+La Grande Combinasion: 10M/s-300M/s
+Los Combinasionas: 15M/s-400M/s
+Nuclearo Dinossauro: 15M/s-300M/s
+Los Hotspotsitos: 20M/s-400M/s
+Garama and Madundung: 50M/s-2B/s
+]]
+
+-- ========= Services =========
+local Players         = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService     = game:GetService("HttpService")
+
+local LP     = Players.LocalPlayer
+local JOB_ID = game.JobId
+
+-- Executor helpers
+local queue_on_tp = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+local has_file    = (typeof(isfile) == "function")
+local read_file   = readfile
+local write_file  = writefile
+local del_file    = delfile
+
+-- ========= CONFIG =========
+local CONFIG = {
+  AVOID_FULL        = true,
+  HOP_DELAY_SEC     = {min=0.2, max=0.6},
+
+  -- chọn phòng
+  PREFERRED_COUNTS  = {6, 7},          -- ưu tiên tuyệt đối
+  NEAR_TARGET       = 6.5,             -- điểm đích
+  NEAR_WINDOW       = {min=4, max=9},  -- ưu tiên gần trong khung này
+  FALLBACK_MIN      = 2,               -- fallback mềm: ≥2 người
+  MIN_OPEN_SOFT     = 2,               -- thích phòng còn ≥2 slot
+
+  -- né server có vẻ VN
+  LOCALE = {
+    avoid_vietnamese          = true,  -- bật né VN
+    vn_ratio_threshold        = 0.40,  -- ≥40% tên giống VN → coi là VN
+    prefer_higher_ping_ms     = 120,   -- >=120ms cộng nhẹ điểm (0 để tắt)
+    penalty_if_vn             = 1000,  -- trừ điểm cực mạnh cho server VN
+  },
+
+  -- visited / lặp
+  TTL_SECONDS       = 3*60*60,         -- sẽ override ở dưới nếu BLOCK_OLD_FOREVER=true
+  MAX_REMEMBER      = 120000,          -- nhớ nhiều jobId để không lặp
+  PERSIST_TO_DISK   = true,
+  BLOCK_OLD_FOREVER = true,            -- 🔒 chặn vĩnh viễn server đã từng vào
+
+  -- ==== BLACKLIST TẠM THỜI (1H) ====
+  TEMP_BLACKLIST_ENABLED = true,       -- bật blacklist tạm
+  TEMP_BLACKLIST_TTL     = 60*60,      -- 1 giờ
+  TEMP_BLACKLIST_ON_FAIL = true,       -- tự động add server fail vào blacklist 1h
+
+  -- retry & loop
+  RETRY_BACKOFF     = {min=0.35, max=0.9},
+  LOOP_INTERVAL     = 2.2,
+  FAIL_COOLDOWN     = 5,
+
+  -- anti-kẹt & escalate
+  LOCK_WATCHDOG     = 3.0,
+  ESCALATE_AFTER_FAILS = 6,            -- nhiều fail liên tiếp → Teleport(place)
+  STALL_TIMEOUT_SEC    = 12,           -- kẹt lâu → Teleport(place)
+
+  -- pet
+  PET_SCAN_INTERVAL = 1.5,
+  PET_CLEAR_GRACE   = 2.0,
+}
+
+if CONFIG.BLOCK_OLD_FOREVER then
+  CONFIG.TTL_SECONDS = 10 * 365 * 24 * 60 * 60  -- 10 năm ≈ vĩnh viễn
+end
+
+-- ========= STATE =========
+local visited, fail_cooldown = {}, {}
+local VISITED_FILE = ("visited_%d.json"):format(TARGET_PLACE_ID)
+
+-- BLACKLIST 1H
+local tblack = {}  -- [jobId] = expiresAt (unix)
+local TBLACK_FILE = ("blacklist_%d.json"):format(TARGET_PLACE_ID)
+
+local HOP_LOCK, LOCK_AT = false, 0
+local LAST_TARGET_ID, LAST_ATTEMPT_AT = nil, 0
+local CONSEC_FAILS = 0
+
+-- ========= Utils =========
+local function now() return os.time() end
+local function clk() return os.clock() end
+local function jdecode(s) local ok,d=pcall(function()return HttpService:JSONDecode(s)end); if ok then return d end end
+local function jencode(t) local ok,s=pcall(function()return HttpService:JSONEncode(t)end); if ok then return s end end
+local function wait_range(a,b) task.wait(a + math.random()*(b-a)) end
+local function on_cooldown(id) local t=fail_cooldown[id]; return t and (now()-t)<=CONFIG.FAIL_COOLDOWN end
+
+local function http_get(url)
+  local ok, body = pcall(game.HttpGet, game, url, true)
+  if ok and body then return true, body end
+  if syn and syn.request then
+    local r = syn.request({Url=url, Method="GET"}); if r and r.StatusCode==200 then return true, r.Body end
+  end
+  if http_request then
+    local r = http_request({Url=url, Method="GET"}); if r and (r.StatusCode==200 or r.StatusCode==0) then return true, (r.Body or r.body) end
+  end
+  return false
+end
+
+local function purge_old()
+  local t=now()
+  for id,ts in pairs(visited) do if type(ts)~="number" or (t-ts)>CONFIG.TTL_SECONDS then visited[id]=nil end end
+  for id,ts in pairs(fail_cooldown) do if (t-ts)>CONFIG.FAIL_COOLDOWN then fail_cooldown[id]=nil end end
+  -- purge blacklist hết hạn
+  for id,exp in pairs(tblack) do if type(exp)~="number" or t>=exp then tblack[id]=nil end end
+  -- cắt bớt visited nếu quá lớn (an toàn)
+  local n=0 for _ in pairs(visited) do n+=1 end
+  if n>CONFIG.MAX_REMEMBER then
+    local drop=n-CONFIG.MAX_REMEMBER
+    for k in pairs(visited) do visited[k]=nil; drop-=1; if drop<=0 then break end end
+  end
+end
+
+-- ====== TeleportData & persist ======
+local function get_tpdata()
+  local out; pcall(function()
+    local td=TeleportService:GetLocalPlayerTeleportData()
+    if td==nil then out=nil
+    elseif typeof(td)=="Instance" and td.ClassName=="TeleportOptions" then
+      local ok,tbl=pcall(function()return td:GetTeleportData()end)
+      if ok and type(tbl)=="table" then out=tbl end
+    elseif type(td)=="table" then out=td end
+  end); return out
+end
+local function merge_num_map(dst, src) if type(src)~="table" then return end; for k,v in pairs(src) do if type(k)=="string" and type(v)=="number" then dst[k]=v end end end
+
+-- Reset visited nếu cần: đặt shared.RESET_VISITED = true trước khi chạy script
+local function reset_visited()
+  visited = {}
+  pcall(function() if typeof(del_file)=="function" then del_file(VISITED_FILE) end end)
+  print("[ServerHop] Đã reset danh sách server đã vào.")
+end
+if rawget(shared, "RESET_VISITED") then reset_visited(); shared.RESET_VISITED = nil end
+
+-- Blacklist 1h helpers
+local function save_blacklist()
+  if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(tblack); if s then pcall(write_file, TBLACK_FILE, s) end end
+end
+local function load_blacklist()
+  if CONFIG.PERSIST_TO_DISK and has_file and isfile(TBLACK_FILE) then
+    local ok,raw=pcall(read_file, TBLACK_FILE)
+    if ok and raw then local obj=jdecode(raw); if type(obj)=="table" then for k,v in pairs(obj) do if type(v)=="number" then tblack[k]=v end end end end
+  end
+end
+local function blacklist_add(id, reason)
+  if not CONFIG.TEMP_BLACKLIST_ENABLED or not id then return end
+  tblack[id] = now() + CONFIG.TEMP_BLACKLIST_TTL
+  print(("[ServerHop] 🛑 Blacklist 1h: %s (%s)"):format(tostring(id), tostring(reason or "")))
+  save_blacklist()
+end
+local function is_blacklisted(id)
+  if not CONFIG.TEMP_BLACKLIST_ENABLED then return false end
+  local exp = tblack[id]
+  return exp and now() < exp
+end
+
+-- Lệnh thủ công
+if rawget(shared, "ADD_BLACKLIST") then
+  local val = shared.ADD_BLACKLIST
+  if type(val)=="string" then blacklist_add(val, "manual")
+  elseif type(val)=="table" then for _,jid in ipairs(val) do blacklist_add(tostring(jid), "manual") end end
+  shared.ADD_BLACKLIST = nil
+end
+if rawget(shared, "RESET_BLACKLIST") then
+  tblack = {}
+  pcall(function() if typeof(del_file)=="function" then del_file(TBLACK_FILE) end end)
+  print("[ServerHop] Đã reset blacklist tạm (1h).")
+  shared.RESET_BLACKLIST = nil
+end
+
+local function save_persist() if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(visited); if s then pcall(write_file,VISITED_FILE,s) end end end
+local function load_persist()
+  local td=get_tpdata(); if td and td.visited then merge_num_map(visited,td.visited) end
+  if CONFIG.PERSIST_TO_DISK and has_file and isfile(VISITED_FILE) then local ok,raw=pcall(read_file,VISITED_FILE); if ok and raw then merge_num_map(visited, jdecode(raw) or {}) end end
+  if rawget(shared,"__HOP_CARRY") then local c=shared.__HOP_CARRY; if c.visited then merge_num_map(visited,c.visited) end end
+  visited[JOB_ID]=now(); purge_old()
+end
+local function carry_on_tp() if not queue_on_tp then return end; local blob=jencode(visited) or "{}"; pcall(queue_on_tp, ([[shared.__HOP_CARRY={visited=%s}]]):format(blob)) end
+
+-- ====== Fetch servers ======
+local function fetch_v1(cursor)
+  local url=("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s"):format(TARGET_PLACE_ID, cursor and ("&cursor="..HttpService:UrlEncode(cursor)) or "")
+  local ok,body=http_get(url); if not ok then return nil end
+  local obj=jdecode(body); if not obj then return nil end
+  return obj
+end
+
+local function fetch_legacy(startindex)
+  startindex=tonumber(startindex) or 0
+  local url=("https://www.roblox.com/games/getgameinstancesjson?placeId=%d&startindex=%d"):format(TARGET_PLACE_ID, startindex)
+  local ok,body=http_get(url); if not ok then return nil end
+  local obj=jdecode(body); if not obj or not obj.Collection then return nil end
+  local data={}
+  for _,v in ipairs(obj.Collection) do
+    local players = {}
+    if type(v.CurrentPlayers)=="table" then
+      for _,p in ipairs(v.CurrentPlayers) do
+        table.insert(players, {username=tostring(p.Username or ""), display=tostring(p.DisplayName or "")})
+      end
+    end
+    table.insert(data, {
+      id = v.Guid,
+      maxPlayers = v.Capacity,
+      playing = v.CurrentPlayers and #v.CurrentPlayers or v.CurrentPlayers or 0,
+      ping = tonumber(v.Ping),
+      players = players
+    })
+  end
+  return { data = data, nextPageCursor = (#data==0) and nil or tostring(startindex+10) }
+end
+
+-- ====== Anti-VN heuristic ======
+local VIET_CHARS_PATTERN = "[àáạảãâầấậẩẫ ăằắặẳẵèéẹẻẽêềếệểễ ìíịỉĩ òóọỏõôồốộổỗơờớợởỡ ùúụủũưừứựửữ ỳýỵỷỹ đĐ]"
+local VN_KEYWORDS = {" viet", " việt", " vn", " nguyen", " trần", " tran ", " lê ", " le ", " pham ", " phạm ", " ngoc ", " minh "}
+local function looks_vietnamese(s)
+  s = " "..string.lower(s or "").." "
+  if s:find(VIET_CHARS_PATTERN) then return true end
+  for _,kw in ipairs(VN_KEYWORDS) do if s:find(kw, 1, true) then return true end end
+  return false
+end
+local function vn_ratio(players)
+  if not players or #players==0 then return 0 end
+  local vn, total = 0, 0
+  for _,p in ipairs(players) do
+    total += 1
+    if looks_vietnamese(p.display) or looks_vietnamese(p.username) then vn += 1 end
+  end
+  return vn/total
+end
+
+-- ====== Pets ======
+local PET_NAMES, PET_HOLD, PET_LAST_SEEN, PET_LAST_FOUND_LIST = {}, false, 0, {}
+local function normalize_pet_list(text)
+  local set = {}
+  for raw in tostring(text):gmatch("[^\r\n]+") do
+    local line = raw:gsub("^%s+",""):gsub("%s+$","")
+    if line~="" and not line:match("^%-%-") then
+      local nameOnly = line:match("^(.-):") or line
+      nameOnly = nameOnly:gsub("%s+$","")
+      set[string.lower(nameOnly)] = true
+    end
+  end
+  return set
+end
+local function load_pet_names()
+  local set = normalize_pet_list(PET_LIST or "")
+  if has_file and isfile("pets_list.txt") then local ok,raw=pcall(read_file,"pets_list.txt"); if ok and raw then for k,_ in pairs(normalize_pet_list(raw)) do set[k]=true end end end
+  PET_NAMES=set
+end
+local function name_hit(sLower) for want,_ in pairs(PET_NAMES) do if sLower:find(want,1,true) then return want end end end
+local function scan_for_pets()
+  if next(PET_NAMES)==nil then return false,{} end
+  local found,matched=false,{}
+  for _,plr in ipairs(Players:GetPlayers()) do
+    local ch=plr.Character
+    if ch then
+      for _,inst in ipairs(ch:GetDescendants()) do
+        local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end
+        if inst:IsA("StringValue") then local v=string.lower(tostring(inst.Value or "")); local h2=name_hit(v); if h2 then found=true; matched[h2]=true end end
+      end
+    end
+    local bp=plr:FindFirstChildOfClass("Backpack")
+    if bp then for _,inst in ipairs(bp:GetDescendants()) do local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end end end
+  end
+  for _,inst in ipairs(workspace:GetDescendants()) do
+    if inst:IsA("Model") or inst:IsA("Folder") or inst:IsA("Accessory") or inst:IsA("Tool") then
+      local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end
+    elseif inst:IsA("StringValue") then
+      local v=string.lower(tostring(inst.Value or "")); local h2=name_hit(v); if h2 then found=true; matched[h2]=true end
+    end
+  end
+  return found,matched
+end
+local function update_pet_hold()
+  local ok,matched=scan_for_pets(); local tnow=tick()
+  if ok then
+    PET_LAST_SEEN=tnow
+    if not PET_HOLD then PET_HOLD=true; PET_LAST_FOUND_LIST={}; for k,_ in pairs(matched) do table.insert(PET_LAST_FOUND_LIST,k) end; print("[ServerHop] ▶️ gặp PET → dừng:", table.concat(PET_LAST_FOUND_LIST,", ")) end
+  elseif PET_HOLD and (tnow-PET_LAST_SEEN)>=CONFIG.PET_CLEAR_GRACE then PET_HOLD=false; print("[ServerHop] ⏩ pet hết → tiếp tục") end
+end
+
+-- ====== Smart picker (ưu tiên nước ngoài + tôn trọng blacklist) ======
+local function in_pref(n) for _,v in ipairs(CONFIG.PREFERRED_COUNTS) do if n==v then return true end end end
+local function pick_server()
+  local bestPref, bestNear, bestFb, bestAny = nil, nil, nil, nil
+  local nearScore, fbScore, anyScore = -1e12, -1e12, -1e12
+  local cursor, tries, mode = nil, 0, "legacy"  -- bắt đầu bằng legacy để có players/ping
+
+  local function consider(s)
+    local id=s.id; local playing=tonumber(s.playing) or 0; local cap=tonumber(s.maxPlayers) or 100
+    local open=cap-playing
+    if id==JOB_ID or visited[id] or on_cooldown(id) or (CONFIG.TEMP_BLACKLIST_ENABLED and is_blacklisted(id)) then return end
+    if CONFIG.AVOID_FULL and open<=0 then return end
+
+    local vr = s.players and vn_ratio(s.players) or 0
+    local isVN = CONFIG.LOCALE.avoid_vietnamese and (vr >= CONFIG.LOCALE.vn_ratio_threshold)
+    local vnPenalty = isVN and CONFIG.LOCALE.penalty_if_vn or 0
+    local openPenalty = (open < CONFIG.MIN_OPEN_SOFT) and 2 or 0
+    local pingBonus = (s.ping and CONFIG.LOCALE.prefer_higher_ping_ms>0 and s.ping >= CONFIG.LOCALE.prefer_higher_ping_ms) and 0.5 or 0
+
+    -- 1) exact 6/7
+    if in_pref(playing) and open>0 then
+      local sc = 10000 - open*0.01 - vnPenalty + pingBonus
+      if not bestPref or sc > (10000 - 0.01) then bestPref = s end
+    end
+
+    -- 2) gần 6.5 trong [4..9]
+    if playing>=CONFIG.NEAR_WINDOW.min and playing<=CONFIG.NEAR_WINDOW.max and open>0 then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - open*0.001 - vnPenalty + pingBonus
+      if sc > nearScore then nearScore = sc; bestNear = s end
+    end
+
+    -- 3) fallback ≥2 người
+    if open>0 and playing>=CONFIG.FALLBACK_MIN then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - vnPenalty + pingBonus
+      if sc > fbScore then fbScore = sc; bestFb = s end
+    end
+
+    -- 4) any open
+    if open>0 then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - vnPenalty + pingBonus
+      if sc > anyScore then anyScore = sc; bestAny = s end
+    end
+  end
+
+  while tries < 60 do
+    local page = (mode=="legacy") and fetch_legacy(cursor) or fetch_v1(cursor)
+    if not page then mode=(mode=="legacy") and "v1" or "legacy"; tries+=1
+    else
+      for _,s in ipairs(page.data or {}) do consider(s) end
+      if bestPref or (not page.nextPageCursor and (bestNear or bestFb or bestAny)) then break end
+      cursor = page.nextPageCursor
+      if not cursor then mode=(mode=="legacy") and "v1" or "legacy" end
+      tries+=1
+    end
+  end
+
+  if bestPref then return bestPref, "pref6/7" end
+  if bestNear then return bestNear, "near(4-9)" end
+  if bestFb   then return bestFb,   "fallback>=2" end
+  return bestAny, "anyopen"
+end
+
+-- ====== Robust Teleport ======
+local function try_teleport(jobId, reason)
+  print(("[ServerHop] Calling Teleport (reason=%s)"):format(reason or "?"))
+  local ok,err=pcall(function() TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, jobId, LP) end)
+  if ok then return true end
+  warn("[ServerHop] Teleport 3-arg error: "..tostring(err))
+  task.wait(0.05)
+  ok,err=pcall(function() TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, jobId, LP, nil, {visited=visited}) end)
+  if ok then return true end
+  warn("[ServerHop] Teleport 5-arg error: "..tostring(err))
+  return false,err
+end
+local function try_random(reason)
+  print(("[ServerHop] Random Teleport (reason=%s)"):format(reason or "?"))
+  local ok,err=pcall(function() TeleportService:Teleport(TARGET_PLACE_ID, LP, {visited=visited}) end)
+  if ok then return true end
+  warn("[ServerHop] Random Teleport(place,player,data) error: "..tostring(err))
+  task.wait(0.05)
+  ok,err=pcall(function() TeleportService:Teleport(TARGET_PLACE_ID) end)
+  if ok then return true end
+  warn("[ServerHop] Random Teleport(place) error: "..tostring(err))
+  return false,err
+end
+
+-- ====== Hop core ======
+local function save_and_carry()
+  if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(visited); if s then pcall(write_file,VISITED_FILE,s) end end
+  if queue_on_tp then local blob=jencode(visited) or "{}"; pcall(queue_on_tp, ([[shared.__HOP_CARRY={visited=%s}]]):format(blob)) end
+end
+
+local function hop_once(tag)
+  if HOP_LOCK or PET_HOLD then return end
+  HOP_LOCK=true; LOCK_AT=clk(); purge_old()
+
+  local target, why = pick_server()
+  if not target then
+    warn("[ServerHop] Hết server phù hợp. Chờ rồi thử lại…")
+    HOP_LOCK=false; return
+  end
+
+  LAST_TARGET_ID  = target.id
+  LAST_ATTEMPT_AT = clk()
+  save_and_carry()
+  print(string.format("[ServerHop] Hopping to %s | players=%s (%s)", target.id, tostring(target.playing), tostring(why)))
+  local okTeleport = try_teleport(target.id, why)
+  if not okTeleport then HOP_LOCK=false; return end
+end
+
+TeleportService.TeleportInitFailed:Connect(function(plr, result, errMsg)
+  if plr~=LP then return end
+  warn("[ServerHop] Teleport failed: "..tostring(result).." | "..tostring(errMsg))
+  if LAST_TARGET_ID then
+    fail_cooldown[LAST_TARGET_ID]=now()
+    if CONFIG.TEMP_BLACKLIST_ENABLED and CONFIG.TEMP_BLACKLIST_ON_FAIL then
+      blacklist_add(LAST_TARGET_ID, "fail:"..tostring(result))
+    end
+  end
+  CONSEC_FAILS += 1
+  HOP_LOCK=false
+  wait_range(CONFIG.RETRY_BACKOFF.min, CONFIG.RETRY_BACKOFF.max)
+
+  if CONSEC_FAILS >= CONFIG.ESCALATE_AFTER_FAILS and not PET_HOLD then
+    CONSEC_FAILS = 0
+    try_random("escalate-fails")
+  else
+    hop_once("retry:"..tostring(result))
+  end
+end)
+
+-- ====== Boot & loops ======
+local function boot()
+  load_blacklist()
+  local td=get_tpdata(); if td and td.visited then merge_num_map(visited,td.visited) end
+  load_persist()
+end
+local function safe(f) local ok,err=pcall(f); if not ok then warn("[ServerHop] init err: ",err) end end
+safe(load_pet_names)
+safe(boot)
+save_blacklist()
+save_persist()
+
+task.defer(function() wait_range(CONFIG.HOP_DELAY_SEC.min, CONFIG.HOP_DELAY_SEC.max); hop_once("start") end)
+
+task.spawn(function()
+  local lastLoop, lastScan = clk(), 0
+  while task.wait(0.25) do
+    if (tick()-lastScan) >= CONFIG.PET_SCAN_INTERVAL then lastScan=tick(); update_pet_hold() end
+
+    -- watchdog: mở khóa & thử ngay nếu kẹt
+    if HOP_LOCK and (clk()-LOCK_AT) > CONFIG.LOCK_WATCHDOG then
+      HOP_LOCK=false
+      if LAST_TARGET_ID then fail_cooldown[LAST_TARGET_ID]=now() end
+      print("[ServerHop] Watchdog: unlock stale lock → hop ngay")
+      hop_once("watchdog")
+    end
+
+    -- escalate nếu kẹt quá lâu
+    if not HOP_LOCK and not PET_HOLD and (clk()-LAST_ATTEMPT_AT) > CONFIG.STALL_TIMEOUT_SEC then
+      CONSEC_FAILS = 0
+      try_random("stall-timeout")
+      LAST_ATTEMPT_AT = clk()
+    end
+
+    if not HOP_LOCK and not PET_HOLD and (clk()-lastLoop) >= CONFIG.LOOP_INTERVAL then
+      lastLoop = clk()
+      hop_once("loop")
+    end
+  end
+end)
+
+print(string.format("[ServerHop] Ready on PlaceId=%d | ưu tiên 6–7, né server 'VN', block server cũ, blacklist tạm 1h | cooldown %ds",
+  TARGET_PLACE_ID, CONFIG.FAIL_COOLDOWN))
+
+        end)
+    else
+        if finder_secret_20m_s_auto_thread then
+            task.cancel(finder_secret_20m_s_auto_thread)
+            finder_secret_20m_s_auto_thread = nil
+        end
+    end
+end)
+-- ======================================================
+
+
+-- ===== Finder > finder secret 50m/s auto =====
+local finder_secret_50m_s_auto_thread = nil
+local finder_secret_50m_s_autoToggle = createToggle(contentTabs["Finder"], "finder secret 50m/s auto", "Auto finder", 3)
+finder_secret_50m_s_autoToggle.SetCallback(function(state)
+    if state then
+        if finder_secret_50m_s_auto_thread then task.cancel(finder_secret_50m_s_auto_thread) end
+        finder_secret_50m_s_auto_thread = task.spawn(function()
+-- Server Hopper – Steal a Brainrot (smart + anti-VN + block-forever + 1h-temp-blacklist + escalate + pause-on-pet)
+-- Game: https://www.roblox.com/games/109983668079237/Steal-a-Brainrot
+local TARGET_PLACE_ID = 109983668079237
+
+-- ====== PET LIST (mỗi dòng 1 tên; phần sau ":" chỉ là ghi chú, bỏ qua khi khớp) ======
+local PET_LIST = [[
+Graipuss Medussi: 10M/s-20m/s
+La Grande Combinasion: 10M/s-300M/s
+Los Combinasionas: 15M/s-400M/s
+Nuclearo Dinossauro: 15M/s-300M/s
+Los Hotspotsitos: 20M/s-400M/s
+Garama and Madundung: 50M/s-2B/s
+]]
+
+-- ========= Services =========
+local Players         = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService     = game:GetService("HttpService")
+
+local LP     = Players.LocalPlayer
+local JOB_ID = game.JobId
+
+-- Executor helpers
+local queue_on_tp = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+local has_file    = (typeof(isfile) == "function")
+local read_file   = readfile
+local write_file  = writefile
+local del_file    = delfile
+
+-- ========= CONFIG =========
+local CONFIG = {
+  AVOID_FULL        = true,
+  HOP_DELAY_SEC     = {min=0.2, max=0.6},
+
+  -- chọn phòng
+  PREFERRED_COUNTS  = {6, 7},          -- ưu tiên tuyệt đối
+  NEAR_TARGET       = 6.5,             -- điểm đích
+  NEAR_WINDOW       = {min=4, max=9},  -- ưu tiên gần trong khung này
+  FALLBACK_MIN      = 2,               -- fallback mềm: ≥2 người
+  MIN_OPEN_SOFT     = 2,               -- thích phòng còn ≥2 slot
+
+  -- né server có vẻ VN
+  LOCALE = {
+    avoid_vietnamese          = true,  -- bật né VN
+    vn_ratio_threshold        = 0.40,  -- ≥40% tên giống VN → coi là VN
+    prefer_higher_ping_ms     = 120,   -- >=120ms cộng nhẹ điểm (0 để tắt)
+    penalty_if_vn             = 1000,  -- trừ điểm cực mạnh cho server VN
+  },
+
+  -- visited / lặp
+  TTL_SECONDS       = 3*60*60,         -- sẽ override ở dưới nếu BLOCK_OLD_FOREVER=true
+  MAX_REMEMBER      = 120000,          -- nhớ nhiều jobId để không lặp
+  PERSIST_TO_DISK   = true,
+  BLOCK_OLD_FOREVER = true,            -- 🔒 chặn vĩnh viễn server đã từng vào
+
+  -- ==== BLACKLIST TẠM THỜI (1H) ====
+  TEMP_BLACKLIST_ENABLED = true,       -- bật blacklist tạm
+  TEMP_BLACKLIST_TTL     = 60*60,      -- 1 giờ
+  TEMP_BLACKLIST_ON_FAIL = true,       -- tự động add server fail vào blacklist 1h
+
+  -- retry & loop
+  RETRY_BACKOFF     = {min=0.35, max=0.9},
+  LOOP_INTERVAL     = 2.2,
+  FAIL_COOLDOWN     = 5,
+
+  -- anti-kẹt & escalate
+  LOCK_WATCHDOG     = 3.0,
+  ESCALATE_AFTER_FAILS = 6,            -- nhiều fail liên tiếp → Teleport(place)
+  STALL_TIMEOUT_SEC    = 12,           -- kẹt lâu → Teleport(place)
+
+  -- pet
+  PET_SCAN_INTERVAL = 1.5,
+  PET_CLEAR_GRACE   = 2.0,
+}
+
+if CONFIG.BLOCK_OLD_FOREVER then
+  CONFIG.TTL_SECONDS = 10 * 365 * 24 * 60 * 60  -- 10 năm ≈ vĩnh viễn
+end
+
+-- ========= STATE =========
+local visited, fail_cooldown = {}, {}
+local VISITED_FILE = ("visited_%d.json"):format(TARGET_PLACE_ID)
+
+-- BLACKLIST 1H
+local tblack = {}  -- [jobId] = expiresAt (unix)
+local TBLACK_FILE = ("blacklist_%d.json"):format(TARGET_PLACE_ID)
+
+local HOP_LOCK, LOCK_AT = false, 0
+local LAST_TARGET_ID, LAST_ATTEMPT_AT = nil, 0
+local CONSEC_FAILS = 0
+
+-- ========= Utils =========
+local function now() return os.time() end
+local function clk() return os.clock() end
+local function jdecode(s) local ok,d=pcall(function()return HttpService:JSONDecode(s)end); if ok then return d end end
+local function jencode(t) local ok,s=pcall(function()return HttpService:JSONEncode(t)end); if ok then return s end end
+local function wait_range(a,b) task.wait(a + math.random()*(b-a)) end
+local function on_cooldown(id) local t=fail_cooldown[id]; return t and (now()-t)<=CONFIG.FAIL_COOLDOWN end
+
+local function http_get(url)
+  local ok, body = pcall(game.HttpGet, game, url, true)
+  if ok and body then return true, body end
+  if syn and syn.request then
+    local r = syn.request({Url=url, Method="GET"}); if r and r.StatusCode==200 then return true, r.Body end
+  end
+  if http_request then
+    local r = http_request({Url=url, Method="GET"}); if r and (r.StatusCode==200 or r.StatusCode==0) then return true, (r.Body or r.body) end
+  end
+  return false
+end
+
+local function purge_old()
+  local t=now()
+  for id,ts in pairs(visited) do if type(ts)~="number" or (t-ts)>CONFIG.TTL_SECONDS then visited[id]=nil end end
+  for id,ts in pairs(fail_cooldown) do if (t-ts)>CONFIG.FAIL_COOLDOWN then fail_cooldown[id]=nil end end
+  -- purge blacklist hết hạn
+  for id,exp in pairs(tblack) do if type(exp)~="number" or t>=exp then tblack[id]=nil end end
+  -- cắt bớt visited nếu quá lớn (an toàn)
+  local n=0 for _ in pairs(visited) do n+=1 end
+  if n>CONFIG.MAX_REMEMBER then
+    local drop=n-CONFIG.MAX_REMEMBER
+    for k in pairs(visited) do visited[k]=nil; drop-=1; if drop<=0 then break end end
+  end
+end
+
+-- ====== TeleportData & persist ======
+local function get_tpdata()
+  local out; pcall(function()
+    local td=TeleportService:GetLocalPlayerTeleportData()
+    if td==nil then out=nil
+    elseif typeof(td)=="Instance" and td.ClassName=="TeleportOptions" then
+      local ok,tbl=pcall(function()return td:GetTeleportData()end)
+      if ok and type(tbl)=="table" then out=tbl end
+    elseif type(td)=="table" then out=td end
+  end); return out
+end
+local function merge_num_map(dst, src) if type(src)~="table" then return end; for k,v in pairs(src) do if type(k)=="string" and type(v)=="number" then dst[k]=v end end end
+
+-- Reset visited nếu cần: đặt shared.RESET_VISITED = true trước khi chạy script
+local function reset_visited()
+  visited = {}
+  pcall(function() if typeof(del_file)=="function" then del_file(VISITED_FILE) end end)
+  print("[ServerHop] Đã reset danh sách server đã vào.")
+end
+if rawget(shared, "RESET_VISITED") then reset_visited(); shared.RESET_VISITED = nil end
+
+-- Blacklist 1h helpers
+local function save_blacklist()
+  if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(tblack); if s then pcall(write_file, TBLACK_FILE, s) end end
+end
+local function load_blacklist()
+  if CONFIG.PERSIST_TO_DISK and has_file and isfile(TBLACK_FILE) then
+    local ok,raw=pcall(read_file, TBLACK_FILE)
+    if ok and raw then local obj=jdecode(raw); if type(obj)=="table" then for k,v in pairs(obj) do if type(v)=="number" then tblack[k]=v end end end end
+  end
+end
+local function blacklist_add(id, reason)
+  if not CONFIG.TEMP_BLACKLIST_ENABLED or not id then return end
+  tblack[id] = now() + CONFIG.TEMP_BLACKLIST_TTL
+  print(("[ServerHop] 🛑 Blacklist 1h: %s (%s)"):format(tostring(id), tostring(reason or "")))
+  save_blacklist()
+end
+local function is_blacklisted(id)
+  if not CONFIG.TEMP_BLACKLIST_ENABLED then return false end
+  local exp = tblack[id]
+  return exp and now() < exp
+end
+
+-- Lệnh thủ công
+if rawget(shared, "ADD_BLACKLIST") then
+  local val = shared.ADD_BLACKLIST
+  if type(val)=="string" then blacklist_add(val, "manual")
+  elseif type(val)=="table" then for _,jid in ipairs(val) do blacklist_add(tostring(jid), "manual") end end
+  shared.ADD_BLACKLIST = nil
+end
+if rawget(shared, "RESET_BLACKLIST") then
+  tblack = {}
+  pcall(function() if typeof(del_file)=="function" then del_file(TBLACK_FILE) end end)
+  print("[ServerHop] Đã reset blacklist tạm (1h).")
+  shared.RESET_BLACKLIST = nil
+end
+
+local function save_persist() if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(visited); if s then pcall(write_file,VISITED_FILE,s) end end end
+local function load_persist()
+  local td=get_tpdata(); if td and td.visited then merge_num_map(visited,td.visited) end
+  if CONFIG.PERSIST_TO_DISK and has_file and isfile(VISITED_FILE) then local ok,raw=pcall(read_file,VISITED_FILE); if ok and raw then merge_num_map(visited, jdecode(raw) or {}) end end
+  if rawget(shared,"__HOP_CARRY") then local c=shared.__HOP_CARRY; if c.visited then merge_num_map(visited,c.visited) end end
+  visited[JOB_ID]=now(); purge_old()
+end
+local function carry_on_tp() if not queue_on_tp then return end; local blob=jencode(visited) or "{}"; pcall(queue_on_tp, ([[shared.__HOP_CARRY={visited=%s}]]):format(blob)) end
+
+-- ====== Fetch servers ======
+local function fetch_v1(cursor)
+  local url=("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s"):format(TARGET_PLACE_ID, cursor and ("&cursor="..HttpService:UrlEncode(cursor)) or "")
+  local ok,body=http_get(url); if not ok then return nil end
+  local obj=jdecode(body); if not obj then return nil end
+  return obj
+end
+
+local function fetch_legacy(startindex)
+  startindex=tonumber(startindex) or 0
+  local url=("https://www.roblox.com/games/getgameinstancesjson?placeId=%d&startindex=%d"):format(TARGET_PLACE_ID, startindex)
+  local ok,body=http_get(url); if not ok then return nil end
+  local obj=jdecode(body); if not obj or not obj.Collection then return nil end
+  local data={}
+  for _,v in ipairs(obj.Collection) do
+    local players = {}
+    if type(v.CurrentPlayers)=="table" then
+      for _,p in ipairs(v.CurrentPlayers) do
+        table.insert(players, {username=tostring(p.Username or ""), display=tostring(p.DisplayName or "")})
+      end
+    end
+    table.insert(data, {
+      id = v.Guid,
+      maxPlayers = v.Capacity,
+      playing = v.CurrentPlayers and #v.CurrentPlayers or v.CurrentPlayers or 0,
+      ping = tonumber(v.Ping),
+      players = players
+    })
+  end
+  return { data = data, nextPageCursor = (#data==0) and nil or tostring(startindex+10) }
+end
+
+-- ====== Anti-VN heuristic ======
+local VIET_CHARS_PATTERN = "[àáạảãâầấậẩẫ ăằắặẳẵèéẹẻẽêềếệểễ ìíịỉĩ òóọỏõôồốộổỗơờớợởỡ ùúụủũưừứựửữ ỳýỵỷỹ đĐ]"
+local VN_KEYWORDS = {" viet", " việt", " vn", " nguyen", " trần", " tran ", " lê ", " le ", " pham ", " phạm ", " ngoc ", " minh "}
+local function looks_vietnamese(s)
+  s = " "..string.lower(s or "").." "
+  if s:find(VIET_CHARS_PATTERN) then return true end
+  for _,kw in ipairs(VN_KEYWORDS) do if s:find(kw, 1, true) then return true end end
+  return false
+end
+local function vn_ratio(players)
+  if not players or #players==0 then return 0 end
+  local vn, total = 0, 0
+  for _,p in ipairs(players) do
+    total += 1
+    if looks_vietnamese(p.display) or looks_vietnamese(p.username) then vn += 1 end
+  end
+  return vn/total
+end
+
+-- ====== Pets ======
+local PET_NAMES, PET_HOLD, PET_LAST_SEEN, PET_LAST_FOUND_LIST = {}, false, 0, {}
+local function normalize_pet_list(text)
+  local set = {}
+  for raw in tostring(text):gmatch("[^\r\n]+") do
+    local line = raw:gsub("^%s+",""):gsub("%s+$","")
+    if line~="" and not line:match("^%-%-") then
+      local nameOnly = line:match("^(.-):") or line
+      nameOnly = nameOnly:gsub("%s+$","")
+      set[string.lower(nameOnly)] = true
+    end
+  end
+  return set
+end
+local function load_pet_names()
+  local set = normalize_pet_list(PET_LIST or "")
+  if has_file and isfile("pets_list.txt") then local ok,raw=pcall(read_file,"pets_list.txt"); if ok and raw then for k,_ in pairs(normalize_pet_list(raw)) do set[k]=true end end end
+  PET_NAMES=set
+end
+local function name_hit(sLower) for want,_ in pairs(PET_NAMES) do if sLower:find(want,1,true) then return want end end end
+local function scan_for_pets()
+  if next(PET_NAMES)==nil then return false,{} end
+  local found,matched=false,{}
+  for _,plr in ipairs(Players:GetPlayers()) do
+    local ch=plr.Character
+    if ch then
+      for _,inst in ipairs(ch:GetDescendants()) do
+        local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end
+        if inst:IsA("StringValue") then local v=string.lower(tostring(inst.Value or "")); local h2=name_hit(v); if h2 then found=true; matched[h2]=true end end
+      end
+    end
+    local bp=plr:FindFirstChildOfClass("Backpack")
+    if bp then for _,inst in ipairs(bp:GetDescendants()) do local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end end end
+  end
+  for _,inst in ipairs(workspace:GetDescendants()) do
+    if inst:IsA("Model") or inst:IsA("Folder") or inst:IsA("Accessory") or inst:IsA("Tool") then
+      local nm=string.lower(inst.Name or ""); local hit=name_hit(nm); if hit then found=true; matched[hit]=true end
+    elseif inst:IsA("StringValue") then
+      local v=string.lower(tostring(inst.Value or "")); local h2=name_hit(v); if h2 then found=true; matched[h2]=true end
+    end
+  end
+  return found,matched
+end
+local function update_pet_hold()
+  local ok,matched=scan_for_pets(); local tnow=tick()
+  if ok then
+    PET_LAST_SEEN=tnow
+    if not PET_HOLD then PET_HOLD=true; PET_LAST_FOUND_LIST={}; for k,_ in pairs(matched) do table.insert(PET_LAST_FOUND_LIST,k) end; print("[ServerHop] ▶️ gặp PET → dừng:", table.concat(PET_LAST_FOUND_LIST,", ")) end
+  elseif PET_HOLD and (tnow-PET_LAST_SEEN)>=CONFIG.PET_CLEAR_GRACE then PET_HOLD=false; print("[ServerHop] ⏩ pet hết → tiếp tục") end
+end
+
+-- ====== Smart picker (ưu tiên nước ngoài + tôn trọng blacklist) ======
+local function in_pref(n) for _,v in ipairs(CONFIG.PREFERRED_COUNTS) do if n==v then return true end end end
+local function pick_server()
+  local bestPref, bestNear, bestFb, bestAny = nil, nil, nil, nil
+  local nearScore, fbScore, anyScore = -1e12, -1e12, -1e12
+  local cursor, tries, mode = nil, 0, "legacy"  -- bắt đầu bằng legacy để có players/ping
+
+  local function consider(s)
+    local id=s.id; local playing=tonumber(s.playing) or 0; local cap=tonumber(s.maxPlayers) or 100
+    local open=cap-playing
+    if id==JOB_ID or visited[id] or on_cooldown(id) or (CONFIG.TEMP_BLACKLIST_ENABLED and is_blacklisted(id)) then return end
+    if CONFIG.AVOID_FULL and open<=0 then return end
+
+    local vr = s.players and vn_ratio(s.players) or 0
+    local isVN = CONFIG.LOCALE.avoid_vietnamese and (vr >= CONFIG.LOCALE.vn_ratio_threshold)
+    local vnPenalty = isVN and CONFIG.LOCALE.penalty_if_vn or 0
+    local openPenalty = (open < CONFIG.MIN_OPEN_SOFT) and 2 or 0
+    local pingBonus = (s.ping and CONFIG.LOCALE.prefer_higher_ping_ms>0 and s.ping >= CONFIG.LOCALE.prefer_higher_ping_ms) and 0.5 or 0
+
+    -- 1) exact 6/7
+    if in_pref(playing) and open>0 then
+      local sc = 10000 - open*0.01 - vnPenalty + pingBonus
+      if not bestPref or sc > (10000 - 0.01) then bestPref = s end
+    end
+
+    -- 2) gần 6.5 trong [4..9]
+    if playing>=CONFIG.NEAR_WINDOW.min and playing<=CONFIG.NEAR_WINDOW.max and open>0 then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - open*0.001 - vnPenalty + pingBonus
+      if sc > nearScore then nearScore = sc; bestNear = s end
+    end
+
+    -- 3) fallback ≥2 người
+    if open>0 and playing>=CONFIG.FALLBACK_MIN then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - vnPenalty + pingBonus
+      if sc > fbScore then fbScore = sc; bestFb = s end
+    end
+
+    -- 4) any open
+    if open>0 then
+      local sc = -math.abs(playing - CONFIG.NEAR_TARGET) - openPenalty - vnPenalty + pingBonus
+      if sc > anyScore then anyScore = sc; bestAny = s end
+    end
+  end
+
+  while tries < 60 do
+    local page = (mode=="legacy") and fetch_legacy(cursor) or fetch_v1(cursor)
+    if not page then mode=(mode=="legacy") and "v1" or "legacy"; tries+=1
+    else
+      for _,s in ipairs(page.data or {}) do consider(s) end
+      if bestPref or (not page.nextPageCursor and (bestNear or bestFb or bestAny)) then break end
+      cursor = page.nextPageCursor
+      if not cursor then mode=(mode=="legacy") and "v1" or "legacy" end
+      tries+=1
+    end
+  end
+
+  if bestPref then return bestPref, "pref6/7" end
+  if bestNear then return bestNear, "near(4-9)" end
+  if bestFb   then return bestFb,   "fallback>=2" end
+  return bestAny, "anyopen"
+end
+
+-- ====== Robust Teleport ======
+local function try_teleport(jobId, reason)
+  print(("[ServerHop] Calling Teleport (reason=%s)"):format(reason or "?"))
+  local ok,err=pcall(function() TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, jobId, LP) end)
+  if ok then return true end
+  warn("[ServerHop] Teleport 3-arg error: "..tostring(err))
+  task.wait(0.05)
+  ok,err=pcall(function() TeleportService:TeleportToPlaceInstance(TARGET_PLACE_ID, jobId, LP, nil, {visited=visited}) end)
+  if ok then return true end
+  warn("[ServerHop] Teleport 5-arg error: "..tostring(err))
+  return false,err
+end
+local function try_random(reason)
+  print(("[ServerHop] Random Teleport (reason=%s)"):format(reason or "?"))
+  local ok,err=pcall(function() TeleportService:Teleport(TARGET_PLACE_ID, LP, {visited=visited}) end)
+  if ok then return true end
+  warn("[ServerHop] Random Teleport(place,player,data) error: "..tostring(err))
+  task.wait(0.05)
+  ok,err=pcall(function() TeleportService:Teleport(TARGET_PLACE_ID) end)
+  if ok then return true end
+  warn("[ServerHop] Random Teleport(place) error: "..tostring(err))
+  return false,err
+end
+
+-- ====== Hop core ======
+local function save_and_carry()
+  if CONFIG.PERSIST_TO_DISK and write_file then local s=jencode(visited); if s then pcall(write_file,VISITED_FILE,s) end end
+  if queue_on_tp then local blob=jencode(visited) or "{}"; pcall(queue_on_tp, ([[shared.__HOP_CARRY={visited=%s}]]):format(blob)) end
+end
+
+local function hop_once(tag)
+  if HOP_LOCK or PET_HOLD then return end
+  HOP_LOCK=true; LOCK_AT=clk(); purge_old()
+
+  local target, why = pick_server()
+  if not target then
+    warn("[ServerHop] Hết server phù hợp. Chờ rồi thử lại…")
+    HOP_LOCK=false; return
+  end
+
+  LAST_TARGET_ID  = target.id
+  LAST_ATTEMPT_AT = clk()
+  save_and_carry()
+  print(string.format("[ServerHop] Hopping to %s | players=%s (%s)", target.id, tostring(target.playing), tostring(why)))
+  local okTeleport = try_teleport(target.id, why)
+  if not okTeleport then HOP_LOCK=false; return end
+end
+
+TeleportService.TeleportInitFailed:Connect(function(plr, result, errMsg)
+  if plr~=LP then return end
+  warn("[ServerHop] Teleport failed: "..tostring(result).." | "..tostring(errMsg))
+  if LAST_TARGET_ID then
+    fail_cooldown[LAST_TARGET_ID]=now()
+    if CONFIG.TEMP_BLACKLIST_ENABLED and CONFIG.TEMP_BLACKLIST_ON_FAIL then
+      blacklist_add(LAST_TARGET_ID, "fail:"..tostring(result))
+    end
+  end
+  CONSEC_FAILS += 1
+  HOP_LOCK=false
+  wait_range(CONFIG.RETRY_BACKOFF.min, CONFIG.RETRY_BACKOFF.max)
+
+  if CONSEC_FAILS >= CONFIG.ESCALATE_AFTER_FAILS and not PET_HOLD then
+    CONSEC_FAILS = 0
+    try_random("escalate-fails")
+  else
+    hop_once("retry:"..tostring(result))
+  end
+end)
+
+-- ====== Boot & loops ======
+local function boot()
+  load_blacklist()
+  local td=get_tpdata(); if td and td.visited then merge_num_map(visited,td.visited) end
+  load_persist()
+end
+local function safe(f) local ok,err=pcall(f); if not ok then warn("[ServerHop] init err: ",err) end end
+safe(load_pet_names)
+safe(boot)
+save_blacklist()
+save_persist()
+
+task.defer(function() wait_range(CONFIG.HOP_DELAY_SEC.min, CONFIG.HOP_DELAY_SEC.max); hop_once("start") end)
+
+task.spawn(function()
+  local lastLoop, lastScan = clk(), 0
+  while task.wait(0.25) do
+    if (tick()-lastScan) >= CONFIG.PET_SCAN_INTERVAL then lastScan=tick(); update_pet_hold() end
+
+    -- watchdog: mở khóa & thử ngay nếu kẹt
+    if HOP_LOCK and (clk()-LOCK_AT) > CONFIG.LOCK_WATCHDOG then
+      HOP_LOCK=false
+      if LAST_TARGET_ID then fail_cooldown[LAST_TARGET_ID]=now() end
+      print("[ServerHop] Watchdog: unlock stale lock → hop ngay")
+      hop_once("watchdog")
+    end
+
+    -- escalate nếu kẹt quá lâu
+    if not HOP_LOCK and not PET_HOLD and (clk()-LAST_ATTEMPT_AT) > CONFIG.STALL_TIMEOUT_SEC then
+      CONSEC_FAILS = 0
+      try_random("stall-timeout")
+      LAST_ATTEMPT_AT = clk()
+    end
+
+    if not HOP_LOCK and not PET_HOLD and (clk()-lastLoop) >= CONFIG.LOOP_INTERVAL then
+      lastLoop = clk()
+      hop_once("loop")
+    end
+  end
+end)
+
+print(string.format("[ServerHop] Ready on PlaceId=%d | ưu tiên 6–7, né server 'VN', block server cũ, blacklist tạm 1h | cooldown %ds",
+  TARGET_PLACE_ID, CONFIG.FAIL_COOLDOWN))
+
+        end)
+    else
+        if finder_secret_50m_s_auto_thread then
+            task.cancel(finder_secret_50m_s_auto_thread)
+            finder_secret_50m_s_auto_thread = nil
+        end
+    end
+end)
+-- ======================================================
